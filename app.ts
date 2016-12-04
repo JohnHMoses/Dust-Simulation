@@ -7,16 +7,21 @@ class ParticleManager {
     particles: THREE.Geometry;
     pMaterial: THREE.ParticleBasicMaterial;
 
+    particleSystem: THREE.Points;
+
     constructor(public scene: THREE.Scene) {
         this.particleCount = 1800;
         this.particles = new THREE.Geometry();
-        this.pMaterial = new THREE.ParticleBasicMaterial({
+        this.pMaterial = new THREE.PointsMaterial({
             color: 0xFFFFFF,
-            size: 3
+            size: 3,
+            map: THREE.ImageUtils.loadTexture(
+                "particle.png"
+            ),
+            blending: THREE.AdditiveBlending,
+            transparent: true
         });
-    }
 
-    createParticles() {
         for (var p = 0; p < this.particleCount; p++) {
 
             // create a particle with random
@@ -33,12 +38,16 @@ class ParticleManager {
         }
 
         // create the particle system
-        var particleSystem = new THREE.ParticleSystem(
+        this.particleSystem = new THREE.Points(
             this.particles,
             this.pMaterial);
 
         // add it to the scene
-        this.scene.add(particleSystem);
+        this.scene.add(this.particleSystem);
+    }
+
+    update() {
+        this.particleSystem.rotation.x += 0.001;
     }
 
 }
@@ -66,7 +75,6 @@ class ProjectWindow {
         this.controls.enableZoom = true;
 
         this.pManager = new ParticleManager(this.scene);
-        this.pManager.createParticles();
 
         var geometry = new THREE.BoxGeometry(1, 1, 1);
         var material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
@@ -87,7 +95,7 @@ class ProjectWindow {
 
         var that = this;
         setInterval(function () {
-            that.cube.rotation.x += 0.1;
+            that.pManager.update();
             that.renderer.render(that.scene, that.camera);
         }, 1000 / 60);
 
