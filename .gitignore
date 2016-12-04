@@ -1,0 +1,12 @@
+bin/*
+js/*
+obj/*
+three/*
+app.js
+app.js.map
+GraphicsFinalProject.csproj
+GraphicsFinalProject.csproj.user
+web.config
+web.Debug.config
+web.Release.config
+
