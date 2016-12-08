@@ -7,6 +7,11 @@
     https://github.com/BlainMaguire/3dfluid
 */
 
+var stepping = false;
+var applyRightForce = false;
+var addFluid = false;
+var timestep = false;
+
 class FluidDynamicsSolver {
     dens: number[][][]; //x, y, z, from 0 to n + 2
     dens_prev: number[][][];
@@ -16,9 +21,10 @@ class FluidDynamicsSolver {
     v_prev: number[][][];
     u_prev: number[][][];
     w_prev: number[][][];
-    dt: number = 1; //fixed timestep
-    diff: number = 1;
-    lin_solver_times: number = 20;
+    dt: number = 0.4; //fixed timestep
+    diff: number = 0.0;
+    visc: number = 0.0;
+    lin_solver_times: number = 10;
 
     constructor(public n: number) {
         this.dens = [];
@@ -63,9 +69,9 @@ class FluidDynamicsSolver {
 
     add_source(N: number, x: number[][][], s: number[][][], dt: number) {
         let i, j, k;
-        for (i = 0; i < N + 2; i++)
-            for (j = 0; j < N + 2; j++)
-                for (k = 0; k < N + 2; k++)
+        for (i = 1; i < N + 1; i++)
+            for (j = 1; j < N + 1; j++)
+                for (k = 1; k < N + 1; k++)
                     x[i][j][k] += dt * s[i][j][k];
     }
 
@@ -139,9 +145,9 @@ class FluidDynamicsSolver {
                 for (k = 1; k <= N; k++) {
                     x = i - dt0 * u[i][j][k]; y = j - dt0 * v[i][j][k]; z = k - dt0 * w[i][j][k];
 
-                    if (x < 0.5) x = 0.5; if (x > N + 0.5) x = N + 0.5; i1 = i0 + 1;
-                    if (y < 0.5) y = 0.5; if (y > N + 0.5) y = N + 0.5; j1 = j0 + 1;
-                    if (z < 0.5) z = 0.5; if (z > N + 0.5) z = N + 0.5; k1 = k0 + 1;
+                    if (x < 0.5) x = 0.5; if (x > N + 0.5) x = N + 0.5; i0 = Math.floor(x); i1 = i0 + 1;
+                    if (y < 0.5) y = 0.5; if (y > N + 0.5) y = N + 0.5; j0 = Math.floor(y); j1 = j0 + 1;
+                    if (z < 0.5) z = 0.5; if (z > N + 0.5) z = N + 0.5; k0 = Math.floor(z); k1 = k0 + 1;
 
                     s1 = x - i0; s0 = 1 - s1;
                     t1 = y - j0; t0 = 1 - t1;
@@ -169,8 +175,8 @@ class FluidDynamicsSolver {
         let i, j, k;
 
         for (i = 1; i <= N; i++) {
-            for (j = 0; j <= N; j++) {
-                for (k = 0; k <= N; k++) {
+            for (j = 1; j <= N; j++) {
+                for (k = 1; k <= N; k++) {
                     div[i][j][k] = (-1.0 / 3.0) * ((u[i + 1][j][k] - u[i - 1][j][k]) / N + (v[i][j + 1][k] - v[i][j - 1][k]) / N + (w[i][j][k + 1] - w[i][j][k - 1]) / N);
                     p[i][j][k] = 0;
                 }
@@ -182,8 +188,8 @@ class FluidDynamicsSolver {
         this.lin_solve(N, 0, p, div, 1, 6);
 
         for (i = 1; i <= N; i++) {
-            for (j = 0; j <= N; j++) {
-                for (k = 0; k <= N; k++) {
+            for (j = 1; j <= N; j++) {
+                for (k = 1; k <= N; k++) {
                     u[i][j][k] -= 0.5 * N * (p[i + 1][j][k] - p[i - 1][j][k]);
                     v[i][j][k] -= 0.5 * N * (p[i][j + 1][k] - p[i][j - 1][k]);
                     w[i][j][k] -= 0.5 * N * (p[i][j][k + 1] - p[i][j][k - 1]);
@@ -214,8 +220,8 @@ class FluidDynamicsSolver {
         this.project(N, u0, v0, w0, u, v); //TODO: example code doesn't use w0
         //SWAP (u0, u); SWAP (v0, v); SWAP (w0, w); //back to normal
         this.advect(N, 1, u, u0, u0, v0, w0, dt);
-        this.advect(N, 1, v, v0, u0, v0, w0, dt);
-        this.advect(N, 1, w, w0, u0, v0, w0, dt);
+        this.advect(N, 2, v, v0, u0, v0, w0, dt);
+        this.advect(N, 3, w, w0, u0, v0, w0, dt);
         this.project(N, u, v, w, u0, v0); //TODO: similar hariy problem
     }
 }
@@ -247,12 +253,12 @@ class ParticleManager {
             var pX = Math.random() * 500 - 250,
                 pY = Math.random() * 500 - 250,
                 pZ = Math.random() * 500 - 250,
-                particle = new THREE.Vertex(
+                particle = new THREE.Vector3(
                     pX, pY, pZ
                 );
 
             // add it to the geometry
-            this.particles.vertices.push(particle);
+            //this.particles.vertices.push(particle);
         }
 
         // create the particle system
@@ -280,9 +286,17 @@ class ProjectWindow {
     cube: THREE.Mesh;
     grid: THREE.GridHelper;
 
+    solver: FluidDynamicsSolver;
+    fluidCubes: THREE.Mesh[];
+    forceArrows: THREE.ArrowHelper[];
+
     constructor(element: HTMLElement) {
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+        this.camera.translateX(300); this.camera.translateY(300); this.camera.translateZ(300);
+        this.camera.lookAt(new THREE.Vector3(0, 0, 0));
+
         this.renderer = new THREE.WebGLRenderer();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         element.appendChild(this.renderer.domElement);
@@ -301,23 +315,150 @@ class ProjectWindow {
 
         this.grid = new THREE.GridHelper(200, 10, 0xff00ff, 0xff00ff);
         this.scene.add(this.grid);
-    }
 
-    addCube() {
-        //this.scene.add(this.cube);
-
-        this.camera.position.z = 5;
+        this.solver = new FluidDynamicsSolver(10);
+        this.fluidCubes = [];
+        this.forceArrows = [];
     }
 
     render() {
 
         var that = this;
-        setInterval(function () {
-            that.pManager.update();
-            that.renderer.render(that.scene, that.camera);
-        }, 1000 / 60);
+
+        var n = that.solver.n;
+        that.solver.dens_prev[n / 2][n / 2][n / 2] = 10;
+        that.drawFluid();
+
+        function step() {
+                that.pManager.update();
+                //if(stepping)
+                //if(timestep)
+                that.drawFluid();
+
+                if (addFluid)
+                    that.solver.dens[n / 2][n / 2][n / 2] = 50;
+
+                if (applyRightForce)
+                    that.solver.u[2][n / 2][n / 2] = 100;
+                //that.drawForces();
+                that.renderer.render(that.scene, that.camera);
+
+                window.requestAnimationFrame(step);
+        }
+        window.requestAnimationFrame(step);
+
+    }
+
+    drawFluid(): void {
+        for (let cube of this.fluidCubes) {
+            cube.material.dispose();
+            cube.geometry.dispose();
+            this.scene.remove(cube);
+        }
+
+        let n = this.solver.n;
+
+        //this.solver.dens_prev[n / 2][n / 2][n / 2] = 0.5;
+        //this.solver.w_prev[n / 2][n / 2][n / 2] = 1;
+
+        for (let i = 1; i <= n; i++) {
+            for (let j = 1; j <= n; j++) {
+                for (let k = 1; k <= n; k++) {
+                    this.solver.dens_prev[i][j][k] = this.solver.u_prev[i][j][k] = this.solver.v_prev[i][j][k] = this.solver.w_prev[i][j][k] = 0;
+                }
+            }
+        }
+
+        this.solver.vel_step(this.solver.n, this.solver.u, this.solver.v, this.solver.w,
+            this.solver.u_prev, this.solver.v_prev, this.solver.w_prev, this.solver.visc, this.solver.dt);
+        this.solver.dens_step(this.solver.n, this.solver.dens, this.solver.dens_prev,
+            this.solver.u, this.solver.v, this.solver.w, this.solver.diff, this.solver.dt);
+
+        this.fluidCubes = [];
+
+        for (let i = 1; i <= n; i++) {
+            for (let j = 1; j <= n; j++) {
+                for (let k = 1; k <= n; k++) {
+                    let dens = Math.min(Math.max(this.solver.dens[i][j][k], 0), 1);
+                    if (dens != 0) {
+                        let x = (i / n) * 500 - 250;
+                        let y = (j / n) * 500 - 250;
+                        let z = (k / n) * 500 - 250;
+
+                        let c = new THREE.Color(dens, dens, dens);
+                        let geo = new THREE.BoxGeometry(500 / n, 500 / n, 500 / n);
+                        let mat = new THREE.MeshBasicMaterial({
+                            color: c.getHex(),
+                            opacity: 0.05,
+                            transparent: true
+                        });
+
+                        let cube = new THREE.Mesh(geo, mat);
+                        cube.translateX(x); cube.translateY(y); cube.translateZ(z);
+                        this.fluidCubes.push(cube);
+                        this.scene.add(cube);
+                    }
+                }
+            }
+        }
+    }
+
+    drawForces(): void {
+        for (let arrow of this.forceArrows) {
+            this.scene.remove(arrow);
+        }
+
+        let i, j, k;
+        let x, y, z, h;
+        let N = this.solver.n;
+        let u = this.solver.u;
+        let v = this.solver.v;
+        let w = this.solver.w;
 
 
+        h = 1 / N;
+
+        //if (applyRightForce)
+        //    this.solver.u[2][N / 2][N / 2] = 100;
+
+        this.solver.vel_step(this.solver.n, this.solver.u, this.solver.v, this.solver.w,
+            this.solver.u_prev, this.solver.v_prev, this.solver.w_prev, this.solver.visc, this.solver.dt);
+        this.solver.dens_step(this.solver.n, this.solver.dens, this.solver.dens_prev,
+            this.solver.u, this.solver.v, this.solver.w, this.solver.diff, this.solver.dt);
+
+
+        this.forceArrows = [];
+
+        for (i = 1; i <= N; i++) {
+            x = (i - 0.5) * h;
+            for (j = 1; j <= N; j++) {
+                y = (j - 0.5) * h;
+                for (k = 1; k <= N; k++) {
+                    z = (k - 0.5) * h;
+
+                    let from = new THREE.Vector3(x, y, z);
+                    let to = new THREE.Vector3(x + u[i][j][k], y + v[i][j][k], z + w[i][j][k]);
+                    var dir = to.clone().sub(from);
+                    var len = dir.length();
+                    var arrowHelper = new THREE.ArrowHelper(dir.normalize(), from, len, 0xff0000);
+                    this.forceArrows.push(arrowHelper);
+                    this.scene.add(arrowHelper);
+                }
+            }
+        }
+
+
+
+    }
+
+    testSolverRunTime(): number {
+        let start = new Date();
+        this.solver.vel_step(this.solver.n, this.solver.u, this.solver.v, this.solver.w,
+            this.solver.u_prev, this.solver.v_prev, this.solver.w_prev, this.solver.visc, this.solver.dt);
+        this.solver.dens_step(this.solver.n, this.solver.dens, this.solver.dens_prev,
+            this.solver.u, this.solver.v, this.solver.w, this.solver.diff, this.solver.dt);
+        let end = new Date();
+        return end.getTime() - start.getTime();
     }
 
 }
@@ -326,7 +467,33 @@ window.onload = () => {
     let el = document.getElementById('content');
 
     let win = new ProjectWindow(el);
-    win.addCube();
+    console.log(win.testSolverRunTime());
     win.render();
 
 };
+
+window.onkeydown = function (e) {
+    var key = e.keyCode ? e.keyCode : e.which;
+
+    if (key == 38) //up key
+        stepping = true;
+    else if (key == 80) //right key
+        applyRightForce = true;
+    else if (key = 79)
+        addFluid = true;
+    else if (key == 76)
+        timestep = true;
+}
+
+window.onkeyup = function (e) {
+    var key = e.keyCode ? e.keyCode : e.which;
+
+    if (key == 38) //up key
+        stepping = false;
+    else if (key == 80) //right key
+        applyRightForce = false;
+    else if (key == 79) //o key
+        addFluid = false;
+    else if (key == 76) // l
+        timestep = false;
+}
