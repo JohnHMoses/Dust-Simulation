@@ -11,6 +11,14 @@ var stepping = false;
 var applyRightForce = false;
 var addFluid = false;
 var timestep = false;
+var fluidMode = true;
+var vectorMode = false;
+var hideFluid = false;
+var hideArrows = false;
+var maxParticlesPerBlock = 150;
+var tex = THREE.ImageUtils.loadTexture(
+    "cloud_1_512.png"
+);
 
 class FluidDynamicsSolver {
     dens: number[][][]; //x, y, z, from 0 to n + 2
@@ -24,7 +32,7 @@ class FluidDynamicsSolver {
     dt: number = 0.4; //fixed timestep
     diff: number = 0.0;
     visc: number = 0.0;
-    lin_solver_times: number = 10;
+    lin_solver_times: number = 1;
 
     constructor(public n: number) {
         this.dens = [];
@@ -287,6 +295,10 @@ class ProjectWindow {
     grid: THREE.GridHelper;
 
     solver: FluidDynamicsSolver;
+
+    cubeManager: THREE.Object3D;
+    arrowManager: THREE.Object3D;
+
     fluidCubes: THREE.Mesh[];
     forceArrows: THREE.ArrowHelper[];
 
@@ -316,9 +328,84 @@ class ProjectWindow {
         this.grid = new THREE.GridHelper(200, 10, 0xff00ff, 0xff00ff);
         this.scene.add(this.grid);
 
-        this.solver = new FluidDynamicsSolver(10);
+        this.solver = new FluidDynamicsSolver(16);
+
+        this.cubeManager = new THREE.Object3D();
+        this.arrowManager = new THREE.Object3D();
+
         this.fluidCubes = [];
         this.forceArrows = [];
+    }
+
+    setupParticleSystem(n: number) {
+        this.forceArrows = [];
+        for (let i = 1; i <= n; i++) {
+            for (let j = 1; j <= n; j++) {
+                for (let k = 1; k <= n; k++) {
+                    
+                    let x = (i / n) * 500 - 250;
+                    let y = (j / n) * 500 - 250;
+                    let z = (k / n) * 500 - 250;
+
+                    let c = new THREE.Color(0, 0, 0);
+                    let geo = new THREE.BoxGeometry(500 / n, 500 / n, 500 / n);
+                    let mat = new THREE.MeshBasicMaterial({
+                        color: c.getHex(),
+                        opacity: 0.05,
+                        transparent: true
+                    });
+
+                    let cube = new THREE.Mesh(geo, mat);
+                    cube.translateX(x); cube.translateY(y); cube.translateZ(z);
+                    this.cubeManager.add(cube);
+                    this.fluidCubes.push(cube);
+                    this.scene.add(this.cubeManager);
+
+
+                    //arrows
+
+                    let from = new THREE.Vector3(x, y, z);
+                    let to = new THREE.Vector3(x, y, z + 10);
+                    var dir = to.clone().sub(from);
+                    var len = dir.length();
+                    var arrowHelper = new THREE.ArrowHelper(dir.normalize(), from, len, 0xff0000);
+                    arrowHelper.visible = false;
+                    this.arrowManager.add(arrowHelper);
+                    this.forceArrows.push(arrowHelper);
+                    this.scene.add(this.arrowManager);
+                    
+                    /*let geo = new THREE.Geometry();
+                    let mat = new THREE.PointsMaterial({
+                        color: 0xFFFFFF,
+                        size: 10,
+                        map: tex,
+                        blending: THREE.AdditiveBlending,
+                        transparent: true,
+                        opacity: 0
+                    });*/
+
+                    //Was being used for initial particle placement
+                    //let particleLoc = new THREE.Vector3(x, y, z);
+                    //geo.vertices.push(particleLoc);
+
+                   /* let part = new THREE.Points(geo, mat)
+                    this.fluidParticleSystems.push(part);
+                    this.scene.add(part);*/
+                }
+            }
+        }
+
+    }
+
+    cleanPrev() {
+        let n = this.solver.n;
+        for (let i = 1; i <= n; i++) {
+            for (let j = 1; j <= n; j++) {
+                for (let k = 1; k <= n; k++) {
+                    this.solver.dens_prev[i][j][k] = this.solver.u_prev[i][j][k] = this.solver.v_prev[i][j][k] = this.solver.w_prev[i][j][k] = 0;
+                }
+            }
+        }
     }
 
     render() {
@@ -326,21 +413,53 @@ class ProjectWindow {
         var that = this;
 
         var n = that.solver.n;
-        that.solver.dens_prev[n / 2][n / 2][n / 2] = 10;
+
+        this.setupParticleSystem(n);
+        this.cleanPrev();
+
         that.drawFluid();
 
         function step() {
                 that.pManager.update();
                 //if(stepping)
                 //if(timestep)
-                that.drawFluid();
+                that.cleanPrev();
+
+                if (hideArrows) {
+                    that.arrowManager.traverse(function (object) {
+                        object.visible = false;
+                    });
+                    that.cubeManager.traverse(function (object) {
+                        object.visible = true;
+                    });
+                    hideArrows = false;
+                }
+
+                if (hideFluid) {
+                    that.cubeManager.traverse(function (object) {
+                        object.visible = false;
+                    });
+                    that.arrowManager.traverse(function (object) {
+                        object.visible = true;
+                    });
+                    hideFluid = false;
+                }
+
+
 
                 if (addFluid)
-                    that.solver.dens[n / 2][n / 2][n / 2] = 50;
+                    that.solver.dens[n / 2][n / 2][n / 2] = 1500;
 
                 if (applyRightForce)
-                    that.solver.u[2][n / 2][n / 2] = 100;
-                //that.drawForces();
+                    that.solver.u[n / 2][2][n / 2] = 100;
+
+                if (fluidMode)
+                    that.drawFluid();
+
+                if (vectorMode)
+                    that.drawForces();
+
+
                 that.renderer.render(that.scene, that.camera);
 
                 window.requestAnimationFrame(step);
@@ -350,63 +469,93 @@ class ProjectWindow {
     }
 
     drawFluid(): void {
-        for (let cube of this.fluidCubes) {
+        /*for (let cube of this.fluidCubes) {
             cube.material.dispose();
             cube.geometry.dispose();
             this.scene.remove(cube);
-        }
+        }*/
+        
 
         let n = this.solver.n;
 
-        //this.solver.dens_prev[n / 2][n / 2][n / 2] = 0.5;
-        //this.solver.w_prev[n / 2][n / 2][n / 2] = 1;
-
-        for (let i = 1; i <= n; i++) {
-            for (let j = 1; j <= n; j++) {
-                for (let k = 1; k <= n; k++) {
-                    this.solver.dens_prev[i][j][k] = this.solver.u_prev[i][j][k] = this.solver.v_prev[i][j][k] = this.solver.w_prev[i][j][k] = 0;
-                }
-            }
-        }
+        //this.solver.v_prev[n / 2][2][n / 2] = 1000;
+        //this.solver.dens_prev[n/2][n/2][n/2] = 10000;
 
         this.solver.vel_step(this.solver.n, this.solver.u, this.solver.v, this.solver.w,
             this.solver.u_prev, this.solver.v_prev, this.solver.w_prev, this.solver.visc, this.solver.dt);
         this.solver.dens_step(this.solver.n, this.solver.dens, this.solver.dens_prev,
             this.solver.u, this.solver.v, this.solver.w, this.solver.diff, this.solver.dt);
 
-        this.fluidCubes = [];
+       /* this.fluidCubes = [];*/
 
+        let mat = new THREE.PointsMaterial({
+            color: 0xFFFFFF,
+            size: 10,
+            map: tex,
+            blending: THREE.NormalBlending,
+            transparent: true,
+            opacity: 0.4
+        });
+
+        let count = 0;
         for (let i = 1; i <= n; i++) {
             for (let j = 1; j <= n; j++) {
                 for (let k = 1; k <= n; k++) {
                     let dens = Math.min(Math.max(this.solver.dens[i][j][k], 0), 1);
+
                     if (dens != 0) {
                         let x = (i / n) * 500 - 250;
                         let y = (j / n) * 500 - 250;
                         let z = (k / n) * 500 - 250;
 
                         let c = new THREE.Color(dens, dens, dens);
-                        let geo = new THREE.BoxGeometry(500 / n, 500 / n, 500 / n);
-                        let mat = new THREE.MeshBasicMaterial({
-                            color: c.getHex(),
-                            opacity: 0.05,
-                            transparent: true
-                        });
-
-                        let cube = new THREE.Mesh(geo, mat);
-                        cube.translateX(x); cube.translateY(y); cube.translateZ(z);
-                        this.fluidCubes.push(cube);
-                        this.scene.add(cube);
+                        let cubeMat: THREE.MeshBasicMaterial = <THREE.MeshBasicMaterial>this.fluidCubes[count].material;
+                        cubeMat.color.setHex(c.getHex());
+                        cubeMat.needsUpdate = true;
                     }
+
+                    //this.fluidParticleSystems[count].material.opacity = dens;
+                    //this.fluidParticleSystems[count].material.needsUpdate = true;
+
+                    //spawn random particles as a function of dens
+                    //clear particle system
+
+
+                   /* let geo = new THREE.Geometry();
+
+                    let blockLength = 500 / n;
+
+                    let x = (i / n) * 500 - 250;
+                    let y = (j / n) * 500 - 250;
+                    let z = (k / n) * 500 - 250;
+
+                    let totalParticles = Math.floor(dens * maxParticlesPerBlock);
+                    for (let l = 0; l < totalParticles; l++) {
+
+                        let px = Math.random() * blockLength - (blockLength / 2) + x,
+                            py = Math.random() * blockLength - (blockLength / 2) + y,
+                            pz = Math.random() * blockLength - (blockLength / 2) + z;
+
+                        let new_part = new THREE.Vector3(px, py, pz);
+                        geo.vertices.push(new_part);
+                    }
+                    this.fluidParticleSystems[count].material.dispose();
+                    this.fluidParticleSystems[count].geometry.dispose();
+                    this.scene.remove(this.fluidParticleSystems[count]);
+
+                    this.fluidParticleSystems[count] = new THREE.Points(geo, mat);
+                    this.scene.add(this.fluidParticleSystems[count]);*/
+
+                    count++;
                 }
             }
         }
     }
 
     drawForces(): void {
-        for (let arrow of this.forceArrows) {
+        /*for (let arrow of this.forceArrows) {
             this.scene.remove(arrow);
-        }
+        }*/
 
         let i, j, k;
         let x, y, z, h;
@@ -418,35 +567,35 @@ class ProjectWindow {
 
         h = 1 / N;
 
-        //if (applyRightForce)
-        //    this.solver.u[2][N / 2][N / 2] = 100;
-
         this.solver.vel_step(this.solver.n, this.solver.u, this.solver.v, this.solver.w,
             this.solver.u_prev, this.solver.v_prev, this.solver.w_prev, this.solver.visc, this.solver.dt);
         this.solver.dens_step(this.solver.n, this.solver.dens, this.solver.dens_prev,
             this.solver.u, this.solver.v, this.solver.w, this.solver.diff, this.solver.dt);
 
 
-        this.forceArrows = [];
-
+        let n = this.solver.n;
+        let count = 0;
         for (i = 1; i <= N; i++) {
-            x = (i - 0.5) * h;
             for (j = 1; j <= N; j++) {
-                y = (j - 0.5) * h;
                 for (k = 1; k <= N; k++) {
-                    z = (k - 0.5) * h;
 
+                    let x = (i / n) * 500 - 250;
+                    let y = (j / n) * 500 - 250;
+                    let z = (k / n) * 500 - 250;
                     let from = new THREE.Vector3(x, y, z);
                     let to = new THREE.Vector3(x + u[i][j][k], y + v[i][j][k], z + w[i][j][k]);
-                    var dir = to.clone().sub(from);
-                    var len = dir.length();
-                    var arrowHelper = new THREE.ArrowHelper(dir.normalize(), from, len, 0xff0000);
-                    this.forceArrows.push(arrowHelper);
-                    this.scene.add(arrowHelper);
+                    var dir = to.clone().sub(from).normalize();
+                    var len = dir.length() * 10;
+                    let arrow = this.forceArrows[count];
+
+                    arrow.position = from;
+                    arrow.setDirection(dir);
+                    arrow.setLength(len);
+                    count++
                 }
             }
         }
-
+        
 
 
     }
@@ -477,12 +626,24 @@ window.onkeydown = function (e) {
 
     if (key == 38) //up key
         stepping = true;
-    else if (key == 80) //right key
+    else if (key == 80) //p key
         applyRightForce = true;
-    else if (key = 79)
+    else if (key == 79) // o
         addFluid = true;
     else if (key == 76)
         timestep = true;
+    else if (key == 86) // v
+    {
+        vectorMode = true;
+        fluidMode = false;
+        hideFluid = true;
+    }
+    else if (key == 70)// f
+    {
+        fluidMode = true
+        vectorMode = false;
+        hideArrows = true;
+    }
 }
 
 window.onkeyup = function (e) {
@@ -496,4 +657,5 @@ window.onkeyup = function (e) {
         addFluid = false;
     else if (key == 76) // l
         timestep = false;
+
 }
