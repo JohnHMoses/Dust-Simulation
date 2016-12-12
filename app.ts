@@ -824,6 +824,20 @@ window.onload = () => {
 
     let win = new ProjectWindow(el);
 
+    alert(
+`
+numpad required
+normal orbit mouse controls
+use 8-5-4-6 like WSAD
+7 lowers source box, 9 raises
++ applies force
+numpad enter add fluid
+* increase force by 10%, / decreases force by 10%
+. increases fluide by 10%, 0 decreases fluid by 10%
+1, 2, 3 change force direction
+v goes into force vector mode, f switches back to fluid mode
+`
+    );
     /*let stopRec = <HTMLButtonElement>document.getElementById('stop-record');
     stopRec.disabled = true;
     stopRec.onclick = function () {
